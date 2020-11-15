@@ -2,34 +2,47 @@
 // use std::time::SystemTime;
 use num_bigint::BigUint;
 use std::time::SystemTime;
+use num_traits::{Zero, FromPrimitive};
 
 // Find the decimal square root of a bytes sting.
 // Assumes non-zero length series of decimal digits.
 fn decimal_sqrt<'a, 'tmp>(a: &'a [u8], tmp: &'tmp mut [u8]) -> &'tmp [u8] {
     type Acc = u128;
 
-    //println!("len={}", a.len());
+    // println!("a={}", std::str::from_utf8(a).unwrap());
+    // println!("len={}", a.len());
+
     let mut a = a;
 
     // The current value:
     // last two digits are the from the string.
-    let mut c = 0;
+    let mut c = Acc::zero();
 
     // The part of the root found so far
     // last digit is a digit from the result.
-    let mut p = 0;
+    let mut p = Acc::zero();
 
     // Function to calculate the next digit of the result.
-    fn calc_result_digit(p: Acc, c: Acc) -> Acc {
-        //println!("crd: p={} c={} nx={}", p, c, (0..).position(|x| x*(20*p + x) > c).unwrap());
-        ((0..11).position(|x| x*(20*p + x) > c).unwrap()-1) as Acc
+    fn calc_result_digit(p: &Acc, c: &Acc) -> Acc {
+        let mut x = 0;
+
+        // This loop unrolls to cmovs with small integers.
+        for i in 0..4 {
+            let v = 8 >> i;
+            let y = (x+v)*(20*p + (x+v));
+            if &y <= c {
+                x += v;
+            }
+        }
+        x
     }
 
     let mut len = 0;
 
+    // Handle odd digit at the start.
     if a.len() % 2 != 0 {
-        c = (a[0] - b'0') as Acc;
-        let x = calc_result_digit(p, c);
+        c = Acc::from_u8(a[0] - b'0').unwrap();
+        let x = calc_result_digit(&p, &c);
         let y = x*x;
         p = x;
         a = &a[1..];
@@ -38,18 +51,20 @@ fn decimal_sqrt<'a, 'tmp>(a: &'a [u8], tmp: &'tmp mut [u8]) -> &'tmp [u8] {
         len += 1;
     }
 
+    // Handle pairs of digits.
     for a in a.chunks_exact(2) {
         let digits = ((a[0] - b'0') * 10 + (a[1] - b'0')) as Acc;
         c = c * 100 + digits;
-        let x = calc_result_digit(p, c);
+        let x = calc_result_digit(&p, &c);
         let y = x*(20*p + x);
-        //println!("digits={:02} c={:02} x={} y={}", digits, c, x, y);
+        //println!("digits={:02} p={} c={:02} x={} y={}", digits, p, c, x, y);
         p = p * 10 + x;
         c -= y;
         tmp[len] = x as u8 + b'0';
         len += 1;
     }
 
+    //println!("res={}", std::str::from_utf8(&tmp[0..len]).unwrap());
     // Note that c will be non-zero if the result is not a perfect square.
     &tmp[0..len]
 }
@@ -85,7 +100,10 @@ fn main() {
     
     println!("{} μs", start.elapsed().unwrap().as_micros());
 
-    src.iter().zip(results.iter())
+    src
+        .iter()
+        .zip(results.iter())
+        .take(100)
         .for_each(|(s, d)| {
             let src = std::str::from_utf8(*s).unwrap();
             let dest = std::str::from_utf8(*d).unwrap();
